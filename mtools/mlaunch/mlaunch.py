@@ -93,6 +93,9 @@ def shutdown_host(port, username=None, password=None, authdb=None):
 
 class MLaunchTool(BaseCmdLineTool):
 
+    UNDOCUMENTED_MONGOD_ARGS = ['--nopreallocj']
+    UNDOCUMENTED_MONGOS_ARGS = []
+
     def __init__(self):
         BaseCmdLineTool.__init__(self)
 
@@ -946,10 +949,14 @@ class MLaunchTool(BaseCmdLineTool):
                 # check if the binary accepts this argument or special case -vvv for any number of v
                 if arg in accepted_arguments or re.match(r'-v+', arg):
                     result.append(arg)
+                elif binary.endswith('mongod') and arg in self.UNDOCUMENTED_MONGOD_ARGS:
+                    result.append(arg)
+                elif binary.endswith('mongos') and arg in self.UNDOCUMENTED_MONGOS_ARGS:
+                    result.append(arg)
             elif i > 0 and arguments[i-1] in result:
                 # if it doesn't start with a '-', it could be the value of the last argument, e.g. `--slowms 1000`
                 result.append(arg)
-
+ 
         # return valid arguments as joined string
         return ' '.join(result)
 
