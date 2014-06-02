@@ -1032,10 +1032,7 @@ class MLaunchTool(BaseCmdLineTool):
 
     def _add_user(self, port, name, password, database, roles):
         con = Connection('localhost:%i'%port)
-        try:
-            con[database].add_user(name, password=password, roles=roles)
-        except OperationFailure as e:
-            pass
+        con[database].add_user(name, password=password, roles=roles)
 
 
     def _get_processes(self):
