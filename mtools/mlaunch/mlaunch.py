@@ -135,7 +135,7 @@ class MLaunchTool(BaseCmdLineTool):
         # make sure init is default command even when specifying arguments directly
         if arguments and arguments.startswith('-'):
             arguments = 'init ' + arguments
-        
+
         # default sub-command is `init` if none provided
         elif len(sys.argv) > 1 and sys.argv[1].startswith('-') and sys.argv[1] not in ['-h', '--help', '--version']:
             sys.argv = sys.argv[0:1] + ['init'] + sys.argv[1:]
@@ -144,8 +144,8 @@ class MLaunchTool(BaseCmdLineTool):
         subparsers = self.argparser.add_subparsers(dest='command')
         self.argparser._action_groups[0].title = 'commands'
         self.argparser._action_groups[0].description = 'init is the default command and can be omitted. To get help on individual commands, run mlaunch <command> --help'
-        
-        # init command 
+
+        # init command
         init_parser = subparsers.add_parser('init', help='initialize a new MongoDB environment and start stand-alone instances, replica sets, or sharded clusters.',
             description='initialize a new MongoDB environment and start stand-alone instances, replica sets, or sharded clusters')
 
@@ -158,7 +158,7 @@ class MLaunchTool(BaseCmdLineTool):
         init_parser.add_argument('--nodes', action='store', metavar='NUM', type=int, default=3, help='adds NUM data nodes to replica set (requires --replicaset, default=3)')
         init_parser.add_argument('--arbiter', action='store_true', default=False, help='adds arbiter to replica set (requires --replicaset)')
         init_parser.add_argument('--name', action='store', metavar='NAME', default='replset', help='name for replica set (default=replset)')
-        
+
         # sharded clusters
         init_parser.add_argument('--sharded', action='store', nargs='+', metavar='N', help='creates a sharded setup consisting of several singles or replica sets. Provide either list of shard names or number of shards.')
         init_parser.add_argument('--config', action='store', default=1, type=int, metavar='NUM', choices=[1, 3], help='adds NUM config servers to sharded setup (requires --sharded, NUM must be 1 or 3, default=1)')
@@ -174,12 +174,13 @@ class MLaunchTool(BaseCmdLineTool):
         self._default_auth_roles = ['dbAdminAnyDatabase', 'readWriteAnyDatabase', 'userAdminAnyDatabase', 'clusterAdmin']
         init_parser.add_argument('--auth', action='store_true', default=False, help='enable authentication and create a key file and admin user (default=user/password)')
         init_parser.add_argument('--username', action='store', type=str, default='user', help='username to add (requires --auth, default=user)')
-        init_parser.add_argument('--password', action='store', type=str, default='password', help='password for given username (requires --auth, default=password)')
+        init_parser.add_argument('--password', action='store', type=str, default='password', help='password for given username (requires --auth)')
         init_parser.add_argument('--auth-db', action='store', type=str, default='admin', metavar='DB', help='database where user will be added (requires --auth, default=admin)')
         init_parser.add_argument('--auth-roles', action='store', default=self._default_auth_roles, metavar='ROLE', nargs='*', help='admin user''s privilege roles; note that the clusterAdmin role is required to run the stop command (requires --auth, default="%s")' % ' '.join(self._default_auth_roles))
+        init_parser.add_argument('--auth-role-docs', action='store_true', default=False, help='auth-roles are json documents')
 
         # start command
-        start_parser = subparsers.add_parser('start', help='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.', 
+        start_parser = subparsers.add_parser('start', help='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.',
             description='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.')
         start_parser.add_argument('tags', metavar='TAG', action='store', nargs='*', default=[], help='without tags, all non-running nodes will be restarted. Provide additional tags to narrow down the set of nodes to start.')
         start_parser.add_argument('--verbose', action='store_true', default=False, help='outputs more verbose information.')
@@ -192,7 +193,7 @@ class MLaunchTool(BaseCmdLineTool):
         stop_parser.add_argument('tags', metavar='TAG', action='store', nargs='*', default=[], help='without tags, all running nodes will be stopped. Provide additional tags to narrow down the set of nodes to stop.')
         stop_parser.add_argument('--verbose', action='store_true', default=False, help='outputs more verbose information.')
         stop_parser.add_argument('--dir', action='store', default='./data', help='base directory to stop nodes (default=./data/)')
-        
+
         # list command
         list_parser = subparsers.add_parser('list', help='list MongoDB instances of this environment.',
             description='list MongoDB instances of this environment.')
@@ -229,7 +230,7 @@ class MLaunchTool(BaseCmdLineTool):
 
     def init(self):
         """ sub-command init. Branches out to sharded, replicaset or single node methods. """
-        
+
         # check for existing environment. Only allow subsequent 'mlaunch init' if they are identical.
         if self._load_parameters():
             if self.loaded_args != self.args:
@@ -238,7 +239,7 @@ class MLaunchTool(BaseCmdLineTool):
         else:
             first_init = True
 
-        # check if authentication is enabled, make key file       
+        # check if authentication is enabled, make key file
         if self.args['auth'] and first_init:
             if not os.path.exists(self.dir):
                 os.makedirs(self.dir)
@@ -318,13 +319,13 @@ class MLaunchTool(BaseCmdLineTool):
 
                     time.sleep(1)
 
-        
+
         elif self.args['single']:
             # just start node
             nodes = self.get_tagged(['single', 'down'])
             self._start_on_ports(nodes, wait=False)
 
-        
+
         elif self.args['replicaset']:
             # start nodes and wait
             nodes = sorted(self.get_tagged(['mongod', 'down']))
@@ -358,16 +359,28 @@ class MLaunchTool(BaseCmdLineTool):
             if not nodes:
                 raise RuntimeError("can't connect to server, so adding admin user isn't possible")
 
-            if "clusterAdmin" not in self.args['auth_roles']:
+            roles = []
+            found_cluster_admin = False
+            if self.args['auth_role_docs']:
+                for role_str in self.args['auth_roles']:
+                    role_doc = json.loads(role_str)
+                    roles.append(role_doc)
+                    if role_doc['role'] == "clusterAdmin":
+                        found_cluster_admin = True
+            else:
+                roles = self.args['auth_role_docs']
+                found_cluster_admin = "clusterAdmin" in self.args['auth_roles']
+
+            if not found_cluster_admin:
                 warnings.warn("the stop command will not work with auth if the user does not have the clusterAdmin role")
 
-            self._add_user(sorted(nodes)[0], name=self.args['username'], password=self.args['password'], 
-                database=self.args['auth_db'], roles=self.args['auth_roles'])
+            self._add_user(sorted(nodes)[0], name=self.args['username'], password=self.args['password'],
+                database=self.args['auth_db'], roles=roles)
 
             if self.args['verbose']:
                 print "added user %s on %s database" % (self.args['username'], self.args['auth_db'])
 
-        
+
         # in sharded env, if --mongos 0, kill the dummy mongos
         if self.args['sharded'] and self.args['mongos'] == 0:
             port = self.args['port']
@@ -415,7 +428,7 @@ class MLaunchTool(BaseCmdLineTool):
         print "%i node%s stopped." % (len(matches), '' if len(matches) == 1 else 's')
 
         # there is a very brief period in which nodes are not reachable anymore, but the
-        # port is not torn down fully yet and an immediate start command would fail. This 
+        # port is not torn down fully yet and an immediate start command would fail. This
         # very short sleep prevents that case, and it is practically not noticable by users
         time.sleep(0.1)
 
@@ -433,11 +446,11 @@ class MLaunchTool(BaseCmdLineTool):
             if len(self.get_tagged(['down'])) == len(self.get_tagged(['all'])):
                 self.args = self.loaded_args
                 print "upgrading mlaunch environment meta-data."
-                return self.init() 
+                return self.init()
             else:
                 raise SystemExit("These nodes were created with an older version of mlaunch (v1.1.1 or below). To upgrade this environment and make use of the start/stop/list commands, stop all nodes manually, then run 'mlaunch start' again. You only have to do this once.")
 
-        
+
         # if new unknown_args are present, compare them with loaded ones (here we can be certain of protocol v2+)
         if self.args['binarypath'] != None or (self.unknown_args and set(self.unknown_args) != set(self.loaded_unknown_args)):
 
@@ -446,7 +459,7 @@ class MLaunchTool(BaseCmdLineTool):
             self.args = self.loaded_args
 
             self.args['binarypath'] = start_args['binarypath']
-            # construct new startup strings with updated unknown args. They are for this start only and 
+            # construct new startup strings with updated unknown args. They are for this start only and
             # will not be persisted in the .mlaunch_startup file
             self._construct_cmdlines()
 
@@ -485,7 +498,7 @@ class MLaunchTool(BaseCmdLineTool):
         for node in sorted(self.get_tagged(['mongos'])):
             doc = {'process':'mongos', 'port':node, 'status': 'running' if self.cluster_running[node] else 'down'}
             print_docs.append( doc )
-        
+
         if len(self.get_tagged(['mongos'])) > 0:
             print_docs.append( None )
 
@@ -493,7 +506,7 @@ class MLaunchTool(BaseCmdLineTool):
         for node in sorted(self.get_tagged(['config'])):
             doc = {'process':'config server', 'port':node, 'status': 'running' if self.cluster_running[node] else 'down'}
             print_docs.append( doc )
-        
+
         if len(self.get_tagged(['config'])) > 0:
             print_docs.append( None )
 
@@ -514,12 +527,12 @@ class MLaunchTool(BaseCmdLineTool):
                 if len(primary) > 0:
                     node = list(primary)[0]
                     print_docs.append( {'process':padding+'primary', 'port':node, 'status': 'running' if self.cluster_running[node] else 'down'} )
-                
+
                 # secondaries
                 secondaries = self.get_tagged(tags + ['secondary', 'running'])
                 for node in sorted(secondaries):
                     print_docs.append( {'process':padding+'secondary', 'port':node, 'status': 'running' if self.cluster_running[node] else 'down'} )
-                
+
                 # data-bearing nodes that are down or not in the replica set yet
                 mongods = self.get_tagged(tags + ['mongod'])
                 arbiters = self.get_tagged(tags + ['arbiter'])
@@ -543,12 +556,12 @@ class MLaunchTool(BaseCmdLineTool):
 
         if self.args['verbose']:
             # print tags as well
-            for doc in filter(lambda x: type(x) == dict, print_docs):               
+            for doc in filter(lambda x: type(x) == dict, print_docs):
                 tags = self.get_tags_of_port(doc['port'])
                 doc['tags'] = ', '.join(tags)
 
-        print_docs.append( None )   
-        print         
+        print_docs.append( None )
+        print
         print_table(print_docs)
 
 
@@ -583,14 +596,14 @@ class MLaunchTool(BaseCmdLineTool):
         print "sent signal %s to %i process%s." % (sig, len(matches), '' if len(matches) == 1 else 'es')
 
         # there is a very brief period in which nodes are not reachable anymore, but the
-        # port is not torn down fully yet and an immediate start command would fail. This 
+        # port is not torn down fully yet and an immediate start command would fail. This
         # very short sleep prevents that case, and it is practically not noticable by users
         time.sleep(0.1)
 
         # refresh discover
         self.discover()
 
-    
+
     # --- below are api helper methods, can be called after creating an MLaunchTool() object
 
 
@@ -614,7 +627,7 @@ class MLaunchTool(BaseCmdLineTool):
         self.cluster_tree = {}
         self.cluster_tags = defaultdict(list)
         self.cluster_running = {}
-        
+
         # get shard names
         shard_names = self._get_shard_names(self.loaded_args)
 
@@ -654,7 +667,7 @@ class MLaunchTool(BaseCmdLineTool):
             self.cluster_running[port] = running
             self.cluster_tags['running' if running else 'down'].append(port)
 
-        
+
         # find all mongos
         for i in range(num_mongos):
             port = i+current_port
@@ -684,7 +697,7 @@ class MLaunchTool(BaseCmdLineTool):
             if is_replicaset:
                 # get replica set states
                 rs_name = shard if shard else self.loaded_args['name']
-                
+
                 try:
                     mrsc = ReplicaSetConnection( ','.join( 'localhost:%i'%i for i in port_range ), replicaSet=rs_name )
                     # primary, secondaries, arbiters
@@ -743,7 +756,7 @@ class MLaunchTool(BaseCmdLineTool):
 
     def get_tagged(self, tags):
         """ The format for the tags list is tuples for tags: mongos, config, shard, secondary tags
-            of the form (tag, number), e.g. ('mongos', 2) which references the second mongos 
+            of the form (tag, number), e.g. ('mongos', 2) which references the second mongos
             in the list. For all other tags, it is simply the string, e.g. 'primary'.
         """
 
@@ -775,7 +788,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         return nodes
 
-    
+
 
     def get_tags_of_port(self, port):
         """ get all tags related to a given port (inverse of what is stored in self.cluster_tags) """
@@ -783,7 +796,7 @@ class MLaunchTool(BaseCmdLineTool):
 
 
     def wait_for(self, ports, interval=1.0, timeout=30, to_start=True):
-        """ Given a list of ports, spawns up threads that will ping the host on each port concurrently. 
+        """ Given a list of ports, spawns up threads that will ping the host on each port concurrently.
             Returns when all hosts are running (if to_start=True) / shut down (if to_start=False)
         """
         threads = []
@@ -794,7 +807,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         if self.args and 'verbose' in self.args and self.args['verbose']:
             print "waiting for nodes %s..." % ('to start' if to_start else 'to shutdown')
-        
+
         for thread in threads:
             thread.start()
 
@@ -821,8 +834,8 @@ class MLaunchTool(BaseCmdLineTool):
 
 
     def _load_parameters(self):
-        """ tries to load the .mlaunch_startup file that exists in each datadir. 
-            Handles different protocol versions. 
+        """ tries to load the .mlaunch_startup file that exists in each datadir.
+            Handles different protocol versions.
         """
         datapath = self.dir
 
@@ -856,7 +869,7 @@ class MLaunchTool(BaseCmdLineTool):
         datapath = self.dir
 
         out_dict = {
-            'protocol_version': 2, 
+            'protocol_version': 2,
             'mtools_version':  __version__,
             'parsed_args': self.args,
             'unknown_args': self.unknown_args,
@@ -883,7 +896,7 @@ class MLaunchTool(BaseCmdLineTool):
             os.makedirs(dbpath)
         if self.args['verbose']:
             print 'creating directory: %s'%dbpath
-        
+
         return datapath
 
 
@@ -900,9 +913,9 @@ class MLaunchTool(BaseCmdLineTool):
                     # combine tag with number, separate by string
                     tags.append( '%s %s' % (tag1, tag2) )
                     continue
-                else: 
+                else:
                     print "warning: ignoring numeric value '%s' after '%s'"  % (tag2, tag1)
-            
+
             tags.append( tag1 )
 
         if len(args['tags']) > 0:
@@ -917,7 +930,7 @@ class MLaunchTool(BaseCmdLineTool):
 
 
     def _filter_valid_arguments(self, arguments, binary="mongod", config=False):
-        """ check which of the list of arguments is accepted by the specified binary (mongod, mongos). 
+        """ check which of the list of arguments is accepted by the specified binary (mongod, mongos).
             returns a list of accepted arguments. If an argument does not start with '-' but its preceding
             argument was accepted, then it is accepted as well. Example ['--slowms', '1000'] both arguments
             would be accepted for a mongod.
@@ -956,14 +969,14 @@ class MLaunchTool(BaseCmdLineTool):
             elif i > 0 and arguments[i-1] in result:
                 # if it doesn't start with a '-', it could be the value of the last argument, e.g. `--slowms 1000`
                 result.append(arg)
- 
+
         # return valid arguments as joined string
         return ' '.join(result)
 
 
     def _get_shard_names(self, args):
         """ get the shard names based on the self.args['sharded'] parameter. If it's a number, create
-            shard names of type shard##, where ## is a 2-digit number. Returns a list [ None ] if 
+            shard names of type shard##, where ## is a 2-digit number. Returns a list [ None ] if
             no shards are present.
         """
 
@@ -974,7 +987,7 @@ class MLaunchTool(BaseCmdLineTool):
                     n_shards = int(args['sharded'][0])
                     shard_names = ['shard%.2i'%(i+1) for i in range(n_shards)]
                 except ValueError, e:
-                    # --sharded was a string, use it as name for the one shard 
+                    # --sharded was a string, use it as name for the one shard
                     shard_names = args['sharded']
             else:
                 shard_names = args['sharded']
@@ -983,14 +996,14 @@ class MLaunchTool(BaseCmdLineTool):
         return shard_names
 
 
-    
+
     def _start_on_ports(self, ports, wait=False):
         threads = []
 
         for port in ports:
             command_str = self.startup_info[str(port)]
             ret = subprocess.call([command_str], stderr=subprocess.STDOUT, stdout=subprocess.PIPE, shell=True)
-            
+
             binary = command_str.split()[0]
             if '--configsvr' in command_str:
                 binary = 'config server'
@@ -1010,7 +1023,7 @@ class MLaunchTool(BaseCmdLineTool):
     def _initiate_replset(self, port, name, maxwait=30):
         # initiate replica set
         if not self.args['replicaset']:
-            return 
+            return
 
         con = Connection('localhost:%i'%port)
         try:
@@ -1032,12 +1045,17 @@ class MLaunchTool(BaseCmdLineTool):
 
     def _add_user(self, port, name, password, database, roles):
         con = Connection('localhost:%i'%port)
-        con[database].add_user(name, password=password, roles=roles)
+        if database == "$external":
+            password = None
 
+        try:
+            con[database].add_user(name, password=password, roles=roles)
+        except OperationFailure as e:
+             print "failed to add user %s, with error %s" % (name, e)
 
     def _get_processes(self):
         all_ports = self.get_tagged('all')
-        
+
         process_dict = {}
 
         for p in psutil.process_iter():
@@ -1051,7 +1069,7 @@ class MLaunchTool(BaseCmdLineTool):
                 port = min(ports)
             else:
                 continue
-                
+
             # only consider processes belonging to this environment
             if port in all_ports:
                 process_dict[port] = p
@@ -1085,11 +1103,11 @@ class MLaunchTool(BaseCmdLineTool):
         if self.args['sharded']:
             # construct startup string for sharded environments
             self._construct_sharded()
-        
+
         elif self.args['single']:
             # construct startup string for single node environment
             self._construct_single(self.dir, self.args['port'])
-            
+
         elif self.args['replicaset']:
             # construct startup strings for a non-sharded replica set
             self._construct_replset(self.dir, self.args['port'], self.args['name'])
@@ -1120,19 +1138,19 @@ class MLaunchTool(BaseCmdLineTool):
         # start up config server(s)
         config_string = []
         config_names = ['config1', 'config2', 'config3'] if self.args['config'] == 3 else ['config']
-            
+
         for name in config_names:
             self._construct_config(self.dir, nextport, name)
             config_string.append('%s:%i'%(self.hostname, nextport))
             nextport += 1
-        
+
         # multiple mongos use <datadir>/mongos/ as subdir for log files
         if num_mongos > 1:
             mongosdir = os.path.join(self.dir, 'mongos')
             if not os.path.exists(mongosdir):
                 if self.args['verbose']:
                     print "creating directory: %s" % mongosdir
-                os.makedirs(mongosdir) 
+                os.makedirs(mongosdir)
 
         # start up mongos, but put them to the front of the port range
         nextport = self.args['port']
@@ -1154,7 +1172,7 @@ class MLaunchTool(BaseCmdLineTool):
         for i in range(self.args['nodes']):
             datapath = self._create_paths(basedir, '%s/rs%i'%(name, i+1))
             self._construct_mongod(os.path.join(datapath, 'db'), os.path.join(datapath, 'mongod.log'), portstart+i, replset=name)
-        
+
             host = '%s:%i'%(self.hostname, portstart+i)
             self.config_docs[name]['members'].append({'_id':len(self.config_docs[name]['members']), 'host':host, 'votes':int(len(self.config_docs[name]['members']) < 7 - int(self.args['arbiter']))})
 
@@ -1162,7 +1180,7 @@ class MLaunchTool(BaseCmdLineTool):
         if self.args['arbiter']:
             datapath = self._create_paths(basedir, '%s/arb'%(name))
             self._construct_mongod(os.path.join(datapath, 'db'), os.path.join(datapath, 'mongod.log'), portstart+self.args['nodes'], replset=name)
-            
+
             host = '%s:%i'%(self.hostname, portstart+self.args['nodes'])
             self.config_docs[name]['members'].append({'_id':len(self.config_docs[name]['members']), 'host':host, 'arbiterOnly': True})
 
