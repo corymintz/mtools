@@ -218,6 +218,7 @@ class MLaunchTool(BaseCmdLineTool):
 
         # passing either `ssl` (< 2.6) or `sslMode` (<= 2.6)
         # means the client needs to connect with ssl
+        self.args['ssl'] = False
         for i, arg in enumerate(self.unknown_args):
             if arg in ('--ssl', '--sslMode'):
                 self.args['ssl'] = True
