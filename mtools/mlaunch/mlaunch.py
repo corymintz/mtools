@@ -182,7 +182,7 @@ class MLaunchTool(BaseCmdLineTool):
         init_parser.add_argument('--hostname', action='store', default=None, help='hostname to use for shard/replSet config and local connections')
 
         # ssl
-        init_parser.add_argument('--sslClientKeyFile', action='store', type=str, default=None, help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
+        init_parser.add_argument('--sslClientKeyFile', action='store', type=str, default='', help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
 
         # start command
         start_parser = subparsers.add_parser('start', help='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.',
