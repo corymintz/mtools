@@ -31,7 +31,7 @@ except ImportError:
     raise ImportError("Can't import pymongo. See http://api.mongodb.org/python/current/ for instructions on how to install pymongo.")
 
 
-def wait_for_host(port, interval=1, timeout=30, to_start=True, queue=None):
+def wait_for_host(port, ssl, ssl_clientcert, interval=1, timeout=30, to_start=True, queue=None):
     """ Ping a mongos or mongod every `interval` seconds until it responds, or `timeout` seconds have passed. If `to_start`
         is set to False, will wait for the node to shut down instead. This function can be called as a separate thread.
 
@@ -47,7 +47,7 @@ def wait_for_host(port, interval=1, timeout=30, to_start=True, queue=None):
             return False
         try:
             # make connection and ping host
-            con = Connection(host)
+            con = Connection(host, ssl=ssl, ssl_clientcert=ssl_clientcert)
             if not con.alive():
                 raise Exception
             if to_start:
@@ -66,11 +66,11 @@ def wait_for_host(port, interval=1, timeout=30, to_start=True, queue=None):
 
 
 
-def shutdown_host(port, username=None, password=None, authdb=None):
+def shutdown_host(port, ssl, ssl_clientcert, username=None, password=None, authdb=None):
     """ send the shutdown command to a mongod or mongos on given port. This function can be called as a separate thread. """
     host = 'localhost:%i'%port
     try:
-        mc = Connection(host)
+        mc = Connection(host, ssl=ssl, ssl_clientcert=ssl_clientcert)
         try:
             if username and password and authdb:
                 if authdb != "admin":
@@ -179,6 +179,11 @@ class MLaunchTool(BaseCmdLineTool):
         init_parser.add_argument('--auth-roles', action='store', default=self._default_auth_roles, metavar='ROLE', nargs='*', help='admin user''s privilege roles; note that the clusterAdmin role is required to run the stop command (requires --auth, default="%s")' % ' '.join(self._default_auth_roles))
         init_parser.add_argument('--auth-role-docs', action='store_true', default=False, help='auth-roles are json documents')
 
+        init_parser.add_argument('--hostname', action='store', default=None, help='hostname to use for shard/replSet config and local connections')
+
+        # ssl
+        init_parser.add_argument('--sslClientKeyFile', action='store', type=str, default=None, help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
+
         # start command
         start_parser = subparsers.add_parser('start', help='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.',
             description='starts existing MongoDB instances. Example: "mlaunch start config" will start all config servers.')
@@ -210,6 +215,16 @@ class MLaunchTool(BaseCmdLineTool):
 
         # argparser is set up, now call base class run()
         BaseCmdLineTool.run(self, arguments, get_unknowns=True)
+
+        # passing either `ssl` (< 2.6) or `sslMode` (<= 2.6)
+        # means the client needs to connect with ssl
+        for i, arg in enumerate(self.unknown_args):
+            if arg in ('--ssl', '--sslMode'):
+                self.args['ssl'] = True
+                break
+
+        if self.args['hostname']:
+            self.hostname = self.args['hostname']
 
         # conditions on argument combinations
         if self.args['command'] == 'init' and 'single' in self.args and self.args['single']:
@@ -282,7 +297,7 @@ class MLaunchTool(BaseCmdLineTool):
             if first_init:
                 # add shards
                 mongos = sorted(self.get_tagged(['mongos']))
-                con = Connection('localhost:%i'%mongos[0])
+                con = Connection('localhost:%i'%mongos[0], ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'])
 
                 shards_to_add = len(self.shard_connection_str)
                 nshards = con['config']['shards'].count()
@@ -368,7 +383,7 @@ class MLaunchTool(BaseCmdLineTool):
                     if role_doc['role'] == "clusterAdmin":
                         found_cluster_admin = True
             else:
-                roles = self.args['auth_role']
+                roles = self.args['auth_roles']
                 found_cluster_admin = "clusterAdmin" in self.args['auth_roles']
 
             if not found_cluster_admin:
@@ -382,7 +397,7 @@ class MLaunchTool(BaseCmdLineTool):
                         print "adding users to %s" % shard
                     self._add_user(members[0], name=self.args['username'], password=self.args['password'],
                                   database=self.args['auth_db'], roles=roles)
-                    
+
             if self.args['verbose']:
                 print "added user %s on %s database" % (self.args['username'], self.args['auth_db'])
 
@@ -394,7 +409,7 @@ class MLaunchTool(BaseCmdLineTool):
             username = self.args['username'] if self.args['auth'] else None
             password = self.args['password'] if self.args['auth'] else None
             authdb = self.args['auth_db'] if self.args['auth'] else None
-            shutdown_host(port, username, password, authdb)
+            shutdown_host(port, self.args['ssl'], self.args['sslClientKeyFile'], username, password, authdb)
 
 
         # write out parameters
@@ -427,7 +442,7 @@ class MLaunchTool(BaseCmdLineTool):
             username = self.loaded_args['username'] if self.loaded_args['auth'] else None
             password = self.loaded_args['password'] if self.loaded_args['auth'] else None
             authdb = self.loaded_args['auth_db'] if self.loaded_args['auth'] else None
-            shutdown_host(port, username, password, authdb)
+            shutdown_host(port, self.args['ssl'], self.args['sslClientKeyFile'], username, password, authdb)
 
         # wait until nodes are all shut down
         self.wait_for(matches, to_start=False)
@@ -705,7 +720,7 @@ class MLaunchTool(BaseCmdLineTool):
                 rs_name = shard if shard else self.loaded_args['name']
 
                 try:
-                    mrsc = ReplicaSetConnection( ','.join( 'localhost:%i'%i for i in port_range ), replicaSet=rs_name )
+                    mrsc = ReplicaSetConnection( ','.join( 'localhost:%i'%i for i in port_range ), ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'], replicaSet=rs_name)
                     # primary, secondaries, arbiters
                     if mrsc.primary:
                         self.cluster_tags['primary'].append( mrsc.primary[1] )
@@ -734,7 +749,7 @@ class MLaunchTool(BaseCmdLineTool):
             port = i+current_port
 
             try:
-                mc = Connection( 'localhost:%i'%port )
+                mc = Connection('localhost:%i'%port, ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'])
                 running = True
 
             except ConnectionFailure:
@@ -753,7 +768,7 @@ class MLaunchTool(BaseCmdLineTool):
     def is_running(self, port):
         """ returns if a host on a specific port is running. """
         try:
-            con = Connection('localhost:%s' % port)
+            con = Connection('localhost:%s' % port, ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'])
             con.admin.command('ping')
             return True
         except (AutoReconnect, ConnectionFailure):
@@ -809,7 +824,7 @@ class MLaunchTool(BaseCmdLineTool):
         queue = Queue.Queue()
 
         for port in ports:
-            threads.append(threading.Thread(target=wait_for_host, args=(port, interval, timeout, to_start, queue)))
+            threads.append(threading.Thread(target=wait_for_host, args=(port, self.args['ssl'], self.args['sslClientKeyFile'], interval, timeout, to_start, queue)))
 
         if self.args and 'verbose' in self.args and self.args['verbose']:
             print "waiting for nodes %s..." % ('to start' if to_start else 'to shutdown')
@@ -1031,7 +1046,7 @@ class MLaunchTool(BaseCmdLineTool):
         if not self.args['replicaset']:
             return
 
-        con = Connection('localhost:%i'%port)
+        con = Connection('localhost:%i'%port, ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'])
         try:
             rs_status = con['admin'].command({'replSetGetStatus': 1})
         except OperationFailure, e:
@@ -1050,7 +1065,7 @@ class MLaunchTool(BaseCmdLineTool):
 
 
     def _add_user(self, port, name, password, database, roles):
-        con = Connection('localhost:%i'%port)
+        con = Connection('localhost:%i'%port, ssl=self.args['ssl'], ssl_certfile=self.args['sslClientKeyFile'])
         if database == "$external":
             password = None
 
