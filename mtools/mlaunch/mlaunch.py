@@ -238,7 +238,7 @@ class MLaunchTool(BaseCmdLineTool):
                 self.args['ssl'] = True
                 break
 
-        if self.args['hostname']:
+        if 'hostname' in self.args and self.args['hostname']:
             self.hostname = self.args['hostname']
 
         # conditions on argument combinations
