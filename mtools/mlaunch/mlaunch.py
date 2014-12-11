@@ -205,6 +205,7 @@ class MLaunchTool(BaseCmdLineTool):
         start_parser.add_argument('--verbose', action='store_true', default=False, help='outputs more verbose information.')
         start_parser.add_argument('--dir', action='store', default='./data', help='base directory to start nodes (default=./data/)')
         start_parser.add_argument('--binarypath', action='store', default=None, metavar='PATH', help='search for mongod/s binaries in the specified PATH.')
+        start_parser.add_argument('--sslClientKeyFile', action='store', type=str, default=None, help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
 
         # stop command
         stop_parser = subparsers.add_parser('stop', help='stops running MongoDB instances. Example: "mlaunch stop shard 2 secondary" will stop all secondary nodes of shard 2.',
@@ -212,6 +213,7 @@ class MLaunchTool(BaseCmdLineTool):
         stop_parser.add_argument('tags', metavar='TAG', action='store', nargs='*', default=[], help='without tags, all running nodes will be stopped. Provide additional tags to narrow down the set of nodes to stop.')
         stop_parser.add_argument('--verbose', action='store_true', default=False, help='outputs more verbose information.')
         stop_parser.add_argument('--dir', action='store', default='./data', help='base directory to stop nodes (default=./data/)')
+        stop_parser.add_argument('--sslClientKeyFile', action='store', type=str, default=None, help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
 
         # list command
         list_parser = subparsers.add_parser('list', help='list MongoDB instances of this environment.',
@@ -226,6 +228,8 @@ class MLaunchTool(BaseCmdLineTool):
         kill_parser.add_argument('--dir', action='store', default='./data', help='base directory to kill nodes (default=./data/)')
         kill_parser.add_argument('--signal', action='store', default=15, help='signal to send to processes, default=15 (SIGTERM)')
         kill_parser.add_argument('--verbose', action='store_true', default=False, help='outputs more verbose information.')
+        kill_parser.add_argument('--sslClientKeyFile', action='store', type=str, default=None, help='certificate for mlaunch to use to connect to mongodb (required if --sslCAFile is used)')
+
 
         # argparser is set up, now call base class run()
         BaseCmdLineTool.run(self, arguments, get_unknowns=True)
