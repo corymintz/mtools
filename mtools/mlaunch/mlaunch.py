@@ -535,6 +535,21 @@ class MLaunchTool(BaseCmdLineTool):
         self.discover()
 
 
+    def restart(self):
+        # stop nodes via stop command
+        self.stop()
+
+        # there is a very brief period in which nodes are not reachable anymore, but the
+        # port is not torn down fully yet and an immediate start command would fail. This 
+        # very short sleep prevents that case, and it is practically not noticable by users
+        time.sleep(0.1)
+
+        # refresh discover
+        self.discover()
+
+        # start nodes again via start command
+        self.start()
+
     def list(self):
         """ sub-command list. Takes no further parameters. Will discover the current configuration and
             print a table of all the nodes with status and port.
