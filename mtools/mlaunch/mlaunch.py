@@ -80,7 +80,7 @@ def wait_for_host(port, ssl, ssl_certfile, interval=1, timeout=30, to_start=True
 
 
 
-def shutdown_host(port, ssl, ssl_clientcert, username=None, password=None, authdb=None):
+def shutdown_host(port, ssl, ssl_certfile, username=None, password=None, authdb=None):
     """ send the shutdown command to a mongod or mongos on given port. This function can be called as a separate thread. """
     host = 'localhost:%i'%port
     try:
