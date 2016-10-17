@@ -262,10 +262,6 @@ class MLaunchTool(BaseCmdLineTool):
         # branch out in sub-commands
         getattr(self, self.args['command'])()
 
-    def _read_key_file():
-        with open(os.path.join(self.dir, 'keyfile'), 'r') as f:
-        return ''.join(f.readlines())
-
     # -- below are the main commands: init, start, stop, list
 
     def init(self):
