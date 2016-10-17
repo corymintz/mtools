@@ -99,6 +99,9 @@ def shutdown_host(port, ssl, ssl_clientcert, username=None, password=None, authd
             mc.admin.command('shutdown', force=True)
         except AutoReconnect:
             pass
+        except OperationFailure:
+            print "Error: cannot authenticate to shut down %s." % host
+            return
     except ConnectionFailure:
         pass
     else:
@@ -259,6 +262,9 @@ class MLaunchTool(BaseCmdLineTool):
         # branch out in sub-commands
         getattr(self, self.args['command'])()
 
+    def _read_key_file():
+        with open(os.path.join(self.dir, 'keyfile'), 'r') as f:
+        return ''.join(f.readlines())
 
     # -- below are the main commands: init, start, stop, list
 
@@ -300,7 +306,7 @@ class MLaunchTool(BaseCmdLineTool):
 
             # start mongod (shard and config) nodes and wait
             nodes = self.get_tagged(['mongod', 'down'])
-            self._start_on_ports(nodes, wait=True)
+            self._start_on_ports(nodes, wait=True, overrideAuth=True)
 
             # initiate replica sets if init is called for the first time
             if first_init:
@@ -311,7 +317,7 @@ class MLaunchTool(BaseCmdLineTool):
 
             # add mongos
             mongos = sorted(self.get_tagged(['mongos', 'down']))
-            self._start_on_ports(mongos, wait=True)
+            self._start_on_ports(mongos, wait=True, overrideAuth=True)
 
             if first_init:
                 # add shards
@@ -438,6 +444,12 @@ class MLaunchTool(BaseCmdLineTool):
 
         # discover again, to get up-to-date info
         self.discover()
+
+        # for sharded authenticated clusters, restart after first_init to enable auth
+        if self.args['sharded'] and self.args['auth'] and first_init:
+            if self.args['verbose']:
+                print "restarting cluster to enable auth..."
+            self.restart()
 
         if self.args['verbose']:
             print "done."
@@ -942,6 +954,8 @@ class MLaunchTool(BaseCmdLineTool):
 
     def _get_ports_from_args(self, args, extra_tag):
         tags = []
+        if 'tags' not in args:
+            args['tags'] = []
 
         for tag1, tag2 in zip(args['tags'][:-1], args['tags'][1:]):
             if re.match('^\d{1,2}$', tag1):
@@ -1037,11 +1051,19 @@ class MLaunchTool(BaseCmdLineTool):
 
 
 
-    def _start_on_ports(self, ports, wait=False):
+    def _start_on_ports(self, ports, wait=False, overrideAuth=False):
         threads = []
+
+        if overrideAuth and self.args['verbose']:
+            print "creating cluster without auth for setup, will enable auth at the end..."
 
         for port in ports:
             command_str = self.startup_info[str(port)]
+
+            if overrideAuth:
+                # this is to set up sharded clusters without auth first, then relaunch with auth
+                command_str = re.sub(r'--keyFile \S+', '', command_str)
+
             ret = subprocess.call([command_str], stderr=subprocess.STDOUT, stdout=subprocess.PIPE, shell=True)
 
             binary = command_str.split()[0]
